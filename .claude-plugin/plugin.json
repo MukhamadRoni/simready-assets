@@ -1,0 +1,8 @@
+{
+  "name": "simready-assets",
+  "version": "0.1.0",
+  "description": "Find, download and convert NVIDIA SimReady 3D assets one at a time (skill plus MCP server). Never downloads the whole 476 GB dataset.",
+  "author": { "name": "Mukhamad Roni" },
+  "license": "MIT",
+  "repository": "https://github.com/MukhamadRoni/simready-assets"
+}

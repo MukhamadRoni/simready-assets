@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "simready": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/MukhamadRoni/simready-assets@v0.1.0", "simready-mcp"]
+    }
+  }
+}
