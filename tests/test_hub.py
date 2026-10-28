@@ -89,3 +89,25 @@ def test_download_uses_per_file_and_returns_roots(monkeypatch, tmp_path):
     assert out["a"] == tmp_path / "a" / "simready_usd" / "sm_a.usd"
     plan = hub.DownloadPlan("thumb", {"a": 1}, ["a/simready_usd/.thumbs/t_thumbnail.png"], [])
     assert hub.download(plan, tmp_path) == {"a": None}
+
+
+def test_root_usd_reads_metadata_entries(tmp_path):
+    import json
+    a = tmp_path / "box"
+    (a / "simready_usd").mkdir(parents=True)
+    (a / ".metadata").mkdir()
+    (a / "simready_usd" / "a_first.usd").write_text("x")
+    (a / "simready_usd" / "z_named.usd").write_text("x")
+    (a / ".metadata" / "com.nvidia.simready.root_usds.json").write_text(
+        json.dumps({"format_version": "1.0", "entries": ["simready_usd/z_named.usd"]}))
+    assert root_usd(a).name == "z_named.usd"
+
+
+def test_thumbnail_excludes_dark(monkeypatch, tmp_path):
+    monkeypatch.setattr(hub, "list_files", lambda a: [
+        RemoteFile("a/simready_usd/.thumbs/a_01_thumbnail_dark.png", 1),
+        RemoteFile("a/simready_usd/.thumbs/a_01_thumbnail.png", 1)])
+    got = []
+    monkeypatch.setattr(hub, "hf_hub_download", lambda r, p, **k: got.append(p) or p)
+    hub.thumbnail("a", tmp_path)
+    assert got == ["a/simready_usd/.thumbs/a_01_thumbnail.png"]

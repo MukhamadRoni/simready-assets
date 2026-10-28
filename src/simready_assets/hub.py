@@ -105,15 +105,11 @@ def root_usd(asset_dir: Path) -> Path:
     meta = asset_dir / ".metadata" / "com.nvidia.simready.root_usds.json"
     if meta.is_file():
         try:
-            data = json.loads(meta.read_text(encoding="utf-8"))
-            names = data if isinstance(data, list) else data.get("root_usds") or data.get("root_usd") or []
-            if isinstance(names, str):
-                names = [names]
-            for n in names:
-                for cand in (asset_dir / n, sr / n, sr / Path(n).name):
-                    if cand.is_file():
-                        return cand
-        except (ValueError, AttributeError, OSError):
+            for n in json.loads(meta.read_text(encoding="utf-8"))["entries"]:
+                cand = asset_dir / n
+                if cand.is_file():
+                    return cand
+        except (ValueError, KeyError, TypeError, OSError):
             pass
     if sr.is_dir():
         roots = sorted(p for p in sr.iterdir() if p.is_file() and p.suffix in (".usd", ".usda", ".usdc"))
