@@ -99,7 +99,7 @@ Set them in the client's `env` block, e.g. `"env": {"SIMREADY_DIR": "C:/simready
 | `search_assets` | catalog search, all words must match, optional group |
 | `asset_info` | file count, size for a profile, root USD, whether already downloaded |
 | `get_thumbnail` | the asset's thumbnail as image content |
-| `download_assets` | per-file download into `SIMREADY_DIR`; refuses above `max_total_mb` (default 1024) and returns sizes instead |
+| `download_assets` | per-file download into `SIMREADY_DIR`; refuses above `max_total_mb` (default 1024) and returns sizes instead; reports progress per file. If a download times out or is interrupted, just call it again: it resumes (completed files are skipped) |
 | `convert_to_glb` | converts a downloaded asset to a self-contained Y-up GLB |
 
 ## CLI
@@ -111,8 +111,10 @@ simready find conveyor
 simready groups
 simready info conveyor_belt_a02 --profile web
 simready download conveyor_belt_a02 --profile web --dry-run
-simready convert ~/simready/conveyor_belt_a02 -o conveyor.glb --max-tex 512 --jpeg
-simready build-catalog
+simready convert conveyor_belt_a02 -o conveyor.glb --max-tex 512 --jpeg
+# only in a local checkout (or with --out <file>); under uvx it writes into uv's tool
+# environment, which the running MCP server does not read
+simready build-catalog --out catalog.tsv
 ```
 
 ## Example prompts

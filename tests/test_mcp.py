@@ -10,6 +10,14 @@ from simready_assets.mcp_server import (asset_info, convert_to_glb, download_ass
                                         get_thumbnail, mcp, search_assets)
 
 
+class FakeCtx:
+    def __init__(self):
+        self.progress = []
+
+    async def report_progress(self, progress, total=None, message=None):
+        self.progress.append((progress, total))
+
+
 def test_tools_resources_prompts_registered():
     tools = {t.name for t in asyncio.run(mcp.list_tools())}
     assert tools == {"list_groups", "search_assets", "asset_info", "get_thumbnail", "download_assets", "convert_to_glb"}
@@ -39,7 +47,7 @@ def test_search_tool_shape():
 def test_download_over_limit_downloads_nothing(monkeypatch):
     monkeypatch.setattr(hub, "plan_download", lambda a, p: DownloadPlan(p, {"big": 2_000_000_000}, ["x"], []))
     monkeypatch.setattr(hub, "download", lambda *a, **k: pytest.fail("must not download"))
-    out = download_assets(["big"])
+    out = asyncio.run(download_assets(["big"], ctx=FakeCtx()))
     assert out["downloaded"] == [] and "max_total_mb" in out["message"] and "big" in out["message"]
 
 
@@ -47,7 +55,7 @@ def test_download_reports_missing_and_proceeds(monkeypatch, tmp_path):
     monkeypatch.setenv("SIMREADY_DIR", str(tmp_path))
     monkeypatch.setattr(hub, "plan_download", lambda a, p: DownloadPlan(p, {"ok": 1024}, ["ok/f"], ["nope"]))
     monkeypatch.setattr(hub, "download", lambda plan, dest, **k: {"ok": dest / "ok" / "r.usd"})
-    out = download_assets(["ok", "nope"])
+    out = asyncio.run(download_assets(["ok", "nope"], ctx=FakeCtx()))
     assert out["downloaded"] == ["ok"] and out["missing"] == ["nope"] and out["dest"] == str(tmp_path)
 
 
@@ -69,7 +77,65 @@ def test_asset_info_fields(monkeypatch, tmp_path):
 
 def test_convert_missing_is_error(monkeypatch, tmp_path):
     monkeypatch.setenv("SIMREADY_DIR", str(tmp_path))
-    assert "download" in convert_to_glb("ghost")["error"].lower()
+    err = asyncio.run(convert_to_glb("ghost", ctx=FakeCtx()))["error"]
+    assert "not found at" in err and str(tmp_path / "ghost") in err
+    assert "profile 'web' or 'sim'" not in err
+
+
+def test_convert_existing_folder_without_usd_hints_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIMREADY_DIR", str(tmp_path))
+    (tmp_path / "thumbonly" / "simready_usd" / ".thumbs").mkdir(parents=True)
+    err = asyncio.run(convert_to_glb("thumbonly", ctx=FakeCtx()))["error"]
+    assert "profile 'web' or 'sim'" in err
+
+
+def test_asset_info_thumbnail_only_is_not_downloaded(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIMREADY_DIR", str(tmp_path))
+    files = [hub.RemoteFile("a/simready_usd/a.usd", 10)]
+    monkeypatch.setattr(hub, "list_files", lambda a: files)
+    thumbs = tmp_path / "a" / "simready_usd" / ".thumbs"
+    thumbs.mkdir(parents=True)
+    (thumbs / "t_thumbnail.png").write_text("x")
+    assert asset_info("a")["local_path"] is None
+    (tmp_path / "a" / "simready_usd" / "a.usd").write_text("x")
+    assert asset_info("a")["local_path"] == str(tmp_path / "a")
+
+
+def test_download_reports_progress_and_runs_off_loop(monkeypatch, tmp_path):
+    import threading
+    monkeypatch.setenv("SIMREADY_DIR", str(tmp_path))
+    monkeypatch.setattr(hub, "plan_download", lambda a, p: DownloadPlan(p, {"ok": 1024}, ["ok/f", "ok/g"], []))
+    seen = {}
+
+    def fake_download(plan, dest, on_file=None, **k):
+        seen["thread"] = threading.current_thread()
+        on_file(1, 2)
+        on_file(2, 2)
+        return {"ok": None}
+    monkeypatch.setattr(hub, "download", fake_download)
+    ctx = FakeCtx()
+    out = asyncio.run(download_assets(["ok"], ctx=ctx))
+    assert out["downloaded"] == ["ok"]
+    assert ctx.progress == [(1, 2), (2, 2)]
+    assert seen["thread"] is not threading.main_thread()
+
+
+def test_download_progress_failure_does_not_break(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIMREADY_DIR", str(tmp_path))
+    monkeypatch.setattr(hub, "plan_download", lambda a, p: DownloadPlan(p, {"ok": 1024}, ["ok/f"], []))
+    monkeypatch.setattr(hub, "download", lambda plan, dest, on_file=None, **k: (on_file(1, 1), {"ok": None})[1])
+
+    class Bad(FakeCtx):
+        async def report_progress(self, *a, **k):
+            raise RuntimeError("client gone")
+    assert asyncio.run(download_assets(["ok"], ctx=Bad()))["downloaded"] == ["ok"]
+
+
+def test_ctx_not_in_tool_schema():
+    tools = {t.name: t for t in asyncio.run(mcp.list_tools())}
+    for n in ("download_assets", "convert_to_glb"):
+        assert "ctx" not in tools[n].inputSchema["properties"]
+    assert tools["download_assets"].inputSchema["properties"]["max_total_mb"]["type"] == "number"
 
 
 def test_import_does_no_network():

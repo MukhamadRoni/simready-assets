@@ -111,3 +111,42 @@ def test_thumbnail_excludes_dark(monkeypatch, tmp_path):
     monkeypatch.setattr(hub, "hf_hub_download", lambda r, p, **k: got.append(p) or p)
     hub.thumbnail("a", tmp_path)
     assert got == ["a/simready_usd/.thumbs/a_01_thumbnail.png"]
+
+
+def test_default_dir_expands_tilde_and_vars(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIMREADY_DIR", "~/x")
+    assert "~" not in str(hub.default_dir())
+    monkeypatch.setenv("FOO_T", str(tmp_path))
+    monkeypatch.setenv("SIMREADY_DIR", "$FOO_T/y")
+    assert hub.default_dir() == tmp_path / "y"
+
+
+def test_invalid_names_make_no_network_call(monkeypatch):
+    class Boom:
+        def list_repo_tree(self, *a, **k):
+            raise AssertionError("network call")
+    monkeypatch.setattr(hub, "HfApi", Boom)
+    for bad in ("", "a/../b", "../x", "-x"):
+        with pytest.raises(AssetNotFound):
+            hub.list_files(bad)
+        with pytest.raises(AssetNotFound):
+            hub.thumbnail(bad, Path("."))
+        assert hub.plan_download([bad], "web").missing == [bad]
+
+
+def test_download_calls_on_file(monkeypatch, tmp_path):
+    def fake(repo, path, repo_type, local_dir):
+        f = Path(local_dir) / path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("x")
+        return str(f)
+    monkeypatch.setattr(hub, "hf_hub_download", fake)
+    seen = []
+    plan = hub.DownloadPlan("thumb", {"a": 1}, ["a/1", "a/2", "a/3"], [])
+    hub.download(plan, tmp_path, on_file=lambda d, t: seen.append((d, t)))
+    assert sorted(seen) == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_long_path_warning_wording(monkeypatch):
+    monkeypatch.setattr(hub.os, "name", "nt")
+    assert "SIMREADY_DIR / --dest" in long_path_warning(Path("C:/" + "a" * 90))

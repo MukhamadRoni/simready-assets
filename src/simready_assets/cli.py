@@ -46,15 +46,15 @@ def cmd_info(a) -> int:
     if roots:
         print(f"root USD: {roots[0]}")
     local = dest / a.name
-    print(f"local: {local} ({'present' if local.exists() else 'not downloaded'})")
+    print(f"local: {local} ({'present' if hub.is_downloaded(local) else 'not downloaded'})")
     return 0
 
 
 def cmd_download(a) -> int:
     names = list(a.names)
     if a.from_file:
-        text = Path(a.from_file).read_text(encoding="utf-8")
-        names += [l.strip() for l in text.splitlines() if l.strip() and not l.startswith("#")]
+        text = Path(a.from_file).read_text(encoding="utf-8-sig")
+        names += [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
     if not names:
         _err("no asset names given")
         return 2
@@ -84,12 +84,8 @@ def cmd_convert(a) -> int:
     from . import convert as conv
 
     dest = Path(a.dest) if a.dest else hub.default_dir()
-    target = Path(a.target)
-    if not target.exists():
-        target = dest / a.target
     try:
-        if not target.exists():
-            hub.root_usd(target)  # raises with the download hint
+        target = hub.resolve_target(a.target, dest)
         r = conv.convert(target, Path(a.output) if a.output else None, a.max_tex, a.jpeg)
     except (FileNotFoundError, ValueError) as e:
         _err(f"error: {e}")
@@ -114,10 +110,10 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--group"); s.add_argument("--limit", type=int, default=50); s.set_defaults(fn=cmd_find)
     sp.add_parser("groups").set_defaults(fn=cmd_groups)
     s = sp.add_parser("info"); s.add_argument("name")
-    s.add_argument("--profile", choices=list(hub.PROFILES), default="web"); s.add_argument("--dest")
+    s.add_argument("--profile", choices=list(hub.PROFILES), default="sim"); s.add_argument("--dest")
     s.set_defaults(fn=cmd_info)
     s = sp.add_parser("download"); s.add_argument("names", nargs="*")
-    s.add_argument("--from-file"); s.add_argument("--profile", choices=list(hub.PROFILES), default="web")
+    s.add_argument("--from-file"); s.add_argument("--profile", choices=list(hub.PROFILES), default="sim")
     s.add_argument("--dest"); s.add_argument("--dry-run", action="store_true")
     s.add_argument("--max-total-mb", type=float, default=1024); s.set_defaults(fn=cmd_download)
     s = sp.add_parser("convert"); s.add_argument("target")

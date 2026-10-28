@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP, Image
+import anyio
+import anyio.from_thread
+import anyio.to_thread
+from mcp.server.fastmcp import Context, FastMCP, Image
 
 from . import catalog, hub
 
@@ -58,7 +61,7 @@ def asset_info(name: str, profile: str = "sim") -> dict:
         return {"name": name, "profile": profile,
                 "size_mb": round(sum(f.size for f in picked) / _MB, 2), "files": len(picked),
                 "root_usd": sorted(roots)[0] if roots else None,
-                "local_path": str(local) if local.exists() else None}
+                "local_path": str(local) if hub.is_downloaded(local) else None}
     except hub.AssetNotFound:
         return _not_found(name)
     except Exception as e:
@@ -77,18 +80,20 @@ def get_thumbnail(name: str):
 
 
 @mcp.tool()
-def download_assets(names: list[str], profile: str = "sim", max_total_mb: int = 1024) -> dict:
+async def download_assets(names: list[str], profile: str = "sim", max_total_mb: float = 1024,
+                          ctx: Context = None) -> dict:
     """Download assets from Hugging Face into SIMREADY_DIR (default ~/simready). Sizes are in MB. Refuses and
     downloads nothing if the combined size exceeds max_total_mb (the message lists per-asset sizes); check
     asset_info first and confirm large downloads with the user. Unknown names are reported in "missing" while
-    valid ones still proceed. Profiles: "sim" (full), "web" (USD+textures, enough for convert_to_glb), "thumb"."""
+    valid ones still proceed. Profiles: "sim" (full), "web" (USD+textures, enough for convert_to_glb), "thumb". If a download times out or is interrupted, just
+    call it again: it resumes (files already completed are skipped). Progress is reported per file."""
     dest = hub.default_dir()
     try:
         bad = _bad_profile(profile)
         if bad:
             return {"downloaded": [], "missing": [], "total_mb": 0.0, "dest": str(dest),
                     "message": bad["error"], "error": bad["error"]}
-        plan = hub.plan_download(list(names), profile)
+        plan = await anyio.to_thread.run_sync(hub.plan_download, list(names), profile)
         sizes_mb = {n: round(s / _MB, 1) for n, s in plan.sizes.items()}
         total_mb = round(plan.total_bytes / _MB, 1)
         out = {"downloaded": [], "missing": list(plan.missing), "total_mb": total_mb, "dest": str(dest),
@@ -106,7 +111,16 @@ def download_assets(names: list[str], profile: str = "sim", max_total_mb: int = 
         warn = hub.long_path_warning(dest)
         if warn:
             notes.append(warn)
-        hub.download(plan, dest)
+
+        def on_file(done: int, total: int) -> None:
+            # runs in a worker thread; hop back onto the event loop to send the notification
+            if ctx is not None:
+                try:
+                    anyio.from_thread.run(ctx.report_progress, done, total)
+                except Exception:  # progress is best-effort; never fail the download
+                    pass
+
+        await anyio.to_thread.run_sync(lambda: hub.download(plan, dest, on_file=on_file))
         out["downloaded"] = list(plan.sizes)
         notes.append(f"Downloaded {len(plan.sizes)} asset(s), {total_mb} MB, to {dest}.")
         out["message"] = " ".join(notes)
@@ -117,7 +131,8 @@ def download_assets(names: list[str], profile: str = "sim", max_total_mb: int = 
 
 
 @mcp.tool()
-def convert_to_glb(name_or_path: str, max_tex: int = 1024, jpeg: bool = True) -> dict:
+async def convert_to_glb(name_or_path: str, max_tex: int = 1024, jpeg: bool = True,
+                         ctx: Context = None) -> dict:
     """Convert a downloaded asset (bare name under SIMREADY_DIR, or a path to an asset folder or .usd file) to a
     web-ready .glb (Y-up, metres, textures embedded). max_tex caps texture side in pixels; jpeg re-encodes
     textures to shrink the file. Needs the asset downloaded with profile "web" or "sim" first. Returns path,
@@ -125,12 +140,8 @@ def convert_to_glb(name_or_path: str, max_tex: int = 1024, jpeg: bool = True) ->
     try:
         from . import convert as conv
 
-        target = Path(name_or_path)
-        if not target.exists():
-            target = hub.default_dir() / name_or_path
-        if not target.exists():
-            hub.root_usd(target)  # raises FileNotFoundError with the download hint
-        r = conv.convert(target, None, max_tex, jpeg)
+        target = hub.resolve_target(name_or_path, hub.default_dir())
+        r = await anyio.to_thread.run_sync(conv.convert, target, None, max_tex, jpeg)
         return {"path": str(r.path), "meshes": r.meshes, "triangles": r.triangles, "materials": r.materials,
                 "textures": r.textures, "size_mb": r.size_mb, "dims_m": list(r.dims_m)}
     except (FileNotFoundError, ValueError) as e:

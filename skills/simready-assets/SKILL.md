@@ -32,8 +32,8 @@ advice). Do not promise that the skill alone can download assets in Desktop.
 | Size and root USD | `asset_info` | `simready info <name> --profile sim` |
 | Look at it | `get_thumbnail` | `simready download <name> --profile thumb` |
 | Download | `download_assets` | `simready download <names> --profile sim [--dry-run]` |
-| USD to GLB | `convert_to_glb` | `simready convert <asset dir> -o out.glb --max-tex 1024 --jpeg` |
-| Refresh catalog | (none) | `simready build-catalog` |
+| USD to GLB | `convert_to_glb` | `simready convert <name or asset dir> -o out.glb --max-tex 1024 --jpeg` |
+| Refresh catalog (local checkout only) | (none) | `simready build-catalog --out <file>` |
 
 Downloads go to `SIMREADY_DIR` (default `~/simready`). `HF_TOKEN` is optional (higher Hugging Face
 rate limits). An unknown asset name returns "not found, try search_assets": fix the name, don't retry blindly.
@@ -60,8 +60,8 @@ conveyors), fetch thumbnails first with `get_thumbnail` (CLI: `download --profil
 1 MB each) and look at them before pulling full assets. Suffixes `_a01`, `_b02` are variants of the
 same object family.
 
-If a search finds nothing, the dataset may have grown: run `simready build-catalog` (CLI), then
-search again. Some things simply aren't in it (e.g. CNC machines, injection-molding lines,
+If a search finds nothing, the bundled catalog may be older than the dataset (under `uvx` it can't be
+refreshed in place). Some things simply aren't in it (e.g. CNC machines, injection-molding lines,
 jewelry/gold processing). Say so plainly and suggest the nearest substitutes instead of inventing names.
 
 ## 2. Check size, then download
@@ -96,7 +96,7 @@ Read `references/web-threejs.md` (MCP resource `simready://guide/web-threejs`). 
 `convert_to_glb` (`max_tex` 1024, `jpeg` true), or from the CLI:
 
 ```bash
-simready convert ./simready/conveyor_belt_a02 -o public/assets/conveyor_belt_a02.glb --max-tex 1024 --jpeg
+simready convert conveyor_belt_a02 -o public/assets/conveyor_belt_a02.glb --max-tex 1024 --jpeg
 ```
 
 Output is Y-up, meters, textures embedded. It reports triangle count, file size and real-world
