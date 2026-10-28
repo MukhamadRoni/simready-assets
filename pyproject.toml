@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "simready-assets"
+version = "0.1.0"
+description = "CLI and MCP server for NVIDIA SimReady 3D assets on Hugging Face"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.9,<2",
+    "huggingface_hub>=0.26",
+    "usd-core>=24.11",
+    "numpy>=1.26",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+simready = "simready_assets.cli:main"
+simready-mcp = "simready_assets.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/simready_assets"]
+include = ["src/simready_assets/catalog.tsv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
